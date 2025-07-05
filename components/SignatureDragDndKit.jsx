@@ -10,17 +10,21 @@ import {
 /*****************************
  * 1.  Presentation layer
  *****************************/
-export function SignatureItem({ sig }) {
+export function SignatureItem({ sig, containerRef}) {
   // Make the element draggable
   const { attributes, listeners, setNodeRef, transform } = useDraggable({ id: sig.id });
 
   // During drag, dnd‑kit gives us a `transform` with live delta values.
   // We add those deltas to the stored x/y so the element follows the cursor.
- const container = document.querySelector("[data-overlay-container]");
-  const rect = container?.getBoundingClientRect();
+  const rect =
+    containerRef?.current?.getBoundingClientRect() ?? { width: 1, height: 1 };
+
+   const container   = document.querySelector("[data-overlay-container]");
+  
+  const scrollTop   = container ? container.scrollTop : 0;
 
   const left = sig.xPct * rect.width + (transform?.x ?? 0);
-  const top = sig.yPct * rect.height + (transform?.y ?? 0);
+  const top  = sig.yPct * rect.height + (transform?.y ?? 0);
 
 
   return (
@@ -46,7 +50,7 @@ export function SignatureItem({ sig }) {
 /*****************************
  * 2.  Drag‑&‑drop context layer
  *****************************/
-export function SignaturesLayer({ signatures, onSigUpdate, children }) {
+export function SignaturesLayer({ signatures, selectedId, onSigSelect, onSigUpdate, children, containerRef }) {
   // Pointer sensor is enough for mouse / touch; you can add Keyboard & etc. if needed
   const sensors = useSensors(useSensor(PointerSensor));
 
@@ -56,24 +60,31 @@ export function SignaturesLayer({ signatures, onSigUpdate, children }) {
     
     const id = active.id
     const sig = signatures.find((s) => s.id === id);
-    if (!sig) return;
+     if (!sig || !containerRef?.current) return;
+
+     const rect = containerRef.current.getBoundingClientRect();
 
     // New absolute coords = old + delta (relative movement this drag session)
-    const rect = document.querySelector("[data-overlay-container]")?.getBoundingClientRect();
-if (!rect) return;
-const newPos = {
-  xPct: sig.xPct + delta.x / rect.width,
-  yPct: sig.yPct + delta.y / rect.height,
-};
+      const newX = sig.xPct * rect.width + delta.x;
+    const newY = sig.yPct * rect.height + delta.y;
 
     // Bubble up so the parent can persist to React state / backend
-    onSigUpdate(id, newPos);
+    onSigUpdate(sig.id, {
+      xPct: newX / rect.width,
+      yPct: newY / rect.height,
+    });
   };
 
   return (
     <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
       {signatures.map((sig) => (
-        <SignatureItem key={sig.id} sig={sig} />
+        <SignatureItem key={sig.id} sig={sig} containerRef={containerRef}
+        onClick={() => onSigSelect(sig.id)}                 // ✅ select on click
+    className={`
+      cursor-move
+      ${selectedId === sig.id ? "ring-2 ring-blue-500" : ""}
+    `} 
+        />
       ))}
 
       {/* If you render the PDF page in the same component tree, put it below so signature sits on top */}

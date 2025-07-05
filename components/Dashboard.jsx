@@ -12,16 +12,33 @@ const Dashboard = () => {
   const navigate = useNavigate();
 
   const fetchDocuments = async () => {
-    try {
-      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/docs`, {
-        credentials: "include",
-      });
-      const data = await res.json();
-      setDocuments(data);
-    } catch (error) {
-      console.error("Failed to fetch documents:", error);
+  try {
+    const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/docs`, {
+      method: "GET",
+      credentials: "include",
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `Error ${res.status}`);
     }
-  };
+
+    const data = await res.json();
+
+    // Fix: Handle both array and wrapped object safely
+    const docs = Array.isArray(data)
+      ? data
+      : Array.isArray(data.docs)
+      ? data.docs
+      : [];
+
+    setDocuments(docs);  // always an array
+  } catch (err) {
+    console.error("Failed to fetch documents:", err.message);
+    setDocuments([]); // fallback to empty array
+  }
+};
+
 
   useEffect(() => {
     fetchDocuments();
@@ -54,7 +71,7 @@ const Dashboard = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-cyan-100 via-white to-blue-100">
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-purple-50">
       <Navbar
         onUploadStart={handleUploadStart}
         onUploadSuccess={handleUploadFinish}

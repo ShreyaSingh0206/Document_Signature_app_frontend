@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from "react";
+import { NavLink, Outlet } from 'react-router-dom'
 import { Typewriter } from "react-simple-typewriter";
 import { motion, AnimatePresence } from "framer-motion";
 
 export default function LandingPage() {
   const [typingDone, setTypingDone] = useState(false);
+
+  const MotionNavLink = motion(NavLink);
 
   useEffect(() => {
     const totalTypingTime =
@@ -22,12 +25,12 @@ export default function LandingPage() {
         <div className="text-2xl font-bold tracking-wide ">SignSwift</div>
         <div className="flex items-center space-x-4 sm:space-x-6 mt-4 sm:mt-0 flex-wrap">
          
-          <button
+          <NavLink to="./login"
             className="rounded-lg bg-white text-purple-700 font-semibold px-4 py-2 shadow-sm
                        hover:bg-purple-100 transition-colors"
           >
             Sign In
-          </button>
+          </NavLink>
         </div>
       </nav>
 
@@ -64,15 +67,16 @@ export default function LandingPage() {
 
           <AnimatePresence>
             {typingDone && (
-              <motion.button
-                className="mt-8 rounded-lg bg-gradient-to-r from-purple-600 to-purple-500 text-white
+              <MotionNavLink
+              to="./register"
+                className="mt-8 inline-block rounded-lg bg-gradient-to-r from-purple-600 to-purple-500 text-white
                        text-lg font-semibold px-6 py-3 shadow-lg hover:brightness-110 transition-all"
                 initial={{ y: 20, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
                 transition={{ delay: 0.5, duration: 0.6 }}
               >
                 Get Started
-              </motion.button>
+              </MotionNavLink>
             )}
           </AnimatePresence>
         </div>

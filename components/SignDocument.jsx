@@ -10,6 +10,12 @@ import SatisfyTtf from "../src/fonts/Satisfy-Regular.ttf?arraybuffer";
 import GreatVibesTtf from "../src/fonts/GreatVibes-Regular.ttf?arraybuffer";
 import { SignaturesLayer } from "./SignatureDragDndKit";
 
+import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
+// Option A
+GlobalWorkerOptions.workerSrc = new URL(
+  "pdfjs-dist/build/pdf.worker.min.mjs",
+  import.meta.url
+).toString();
 
 
 const SignDocument = () => {
@@ -22,6 +28,8 @@ const SignDocument = () => {
   const [signatures, setSignatures] = useState([]);       // [{x,y,text,fontFamily,page}]
   const [pendingSig, setPendingSig] = useState(null);
   const containerRef = useRef(null);  
+  const [pageMeta, setPageMeta] = useState([]); 
+  const [pdfHeight, setPdfHeight] = useState(null);
 
    useEffect(() => {
     if (doc) return;
@@ -39,6 +47,31 @@ const SignDocument = () => {
       }
     })();
   }, [doc, id]);
+
+   useEffect(() => {
+  if (!doc?.cloudinaryUrl) return;
+
+  (async () => {
+    try {
+      const pdf = await getDocument(doc.cloudinaryUrl).promise;
+      const meta = [];
+      let total = 0;
+
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const vp   = page.getViewport({ scale: 1 });   // 1 pt → 1 px
+      meta.push({ heightPx: vp.height, heightPt: page.getHeight() });
+      total += vp.height;
+      }
+
+      setPageMeta(meta);
+      setPdfHeight(total);              // px at scale 1
+    } catch (e) {
+      console.error("height calc failed", e);
+      setPdfHeight(1800);               // graceful fallback
+    }
+  })();
+}, [doc]);
 
   function renderSignatureToImage(text, fontFamily, fontSize = 28) {
   const measure = document.createElement("canvas").getContext("2d");
@@ -117,38 +150,26 @@ const embedFont = async (pdfDoc, family, cache) => {
 
       // 2. iterate signatures
       for (const sig of signatures) {
-        // const page = pdfDoc.getPages()[sig.page - 1];
-        // const scale = page.getWidth() / containerW;
-        // // convert on‑screen pixel coords → PDF point coords via ratio
-        // const pdfX = sig.x * scale;
-        // const pdfY = page.getHeight() - (sig.y + sig.fontSize * 0.8) * scale;
-        // page.drawText(sig.text, {
-        //   x: pdfX,
-        //   y: pdfY,
-        //   size: pxToPt(sig.fontSize),
-        //   font: await embedFont(pdfDoc, sig.fontFamily, fontCache),
-        //   color: rgb(0, 0, 0),
-        // });
         const page = pdfDoc.getPages()[sig.page - 1];
 
   const pngBytes = await fetch(sig.dataURL).then((r) => r.arrayBuffer());
   const pngImage = await pdfDoc.embedPng(pngBytes);
 
-  const pageWidth = page.getWidth();
-  const pageHeight = page.getHeight();
+  const pageWpt = page.getWidth();
+  const pageHpt = page.getHeight();
 
-  const scale = 72 / 96; // Convert px to pt (PDF uses 72dpi, browser ≈ 96dpi)
-  const imageWidthPt = sig.width * scale;
-  const imageHeightPt = sig.height * scale;
+  const ptPerPx = 72 / 96; // Convert px to pt (PDF uses 72dpi, browser ≈ 96dpi)
+  const imgWpt = sig.width * ptPerPx;
+  const imgHpt = sig.height * ptPerPx;
 
-  const x = sig.xPct * pageWidth;
-  const y = pageHeight - sig.yPct * pageHeight - imageHeightPt;
+  const x = sig.xPct * pageWpt;
+  const y = pageHpt - sig.yPct * containerRef.current.scrollHeight * (pageHpt/ containerRef.current.scrollHeight) - imgHpt;
 
   page.drawImage(pngImage, {
     x,
     y,
-    width: imageWidthPt,
-    height: imageHeightPt,
+    width: imgWpt,
+    height: imgHpt,
   });
       }
 
@@ -169,6 +190,9 @@ const embedFont = async (pdfDoc, family, cache) => {
     }
   };
 
+  const handleDeleteLastSignature = () => {
+  setSignatures(prev => prev.slice(0, -1));   // drop the last one
+};
   
   if (!doc) {
     return (
@@ -186,32 +210,39 @@ const embedFont = async (pdfDoc, family, cache) => {
       <div
         ref={containerRef}
         data-overlay-container
-        className={`flex-1 relative bg-gray-100 ${
+        className={`flex-1 overflow-auto relative bg-gray-100 ${
           pendingSig ? "cursor-crosshair" : ""
         }`}
-        onClick={(e) => {
-    if (!pendingSig) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+     onClick={(e) => {
+  if (!pendingSig) return;
 
-    const { dataURL, width, height } = renderSignatureToImage(
+  const container = containerRef.current;
+  const rect = container.getBoundingClientRect();
+
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top + container.scrollTop;
+
+  const { dataURL, width, height } = renderSignatureToImage(
     pendingSig.text,
     pendingSig.fontFamily,
     pendingSig.fontSize
   );
 
-    setSignatures((prev) => [
-      ...prev,
-      {
-       id: crypto.randomUUID(),
-      page: 1,
-      xPct: x / rect.width,
-      yPct: y / rect.height,
+  const containerHeight = container.scrollHeight; // total height of iframe+overlay
+  const xPct = x / rect.width;
+  const yPct = y / containerHeight;
+
+  setSignatures((prev) => [
+    ...prev,
+    {
+      id: crypto.randomUUID(),
+      page: 1, // still hardcoded if using iframe (we'll use yPct in final output)
+      xPct,
+      yPct,
       dataURL,
       width,
-      height
-      },
+      height,
+    },
     ]);
     setPendingSig(null);
   }}
@@ -220,13 +251,16 @@ const embedFont = async (pdfDoc, family, cache) => {
         <iframe
           src={`${doc.cloudinaryUrl}#toolbar=0`}
           title={doc.originalName}
-          className="w-full h-full absolute top-0 left-0 z-0"
-          style={{ pointerEvents: pendingSig ? "none" : "auto" }}
+          className="w-full block "
+          style={{ 
+            height: pdfHeight ?? 1800,
+            pointerEvents: pendingSig ? "none" : "auto", }}
         />
        {/* Overlay for draggable signatures */}
      
          <SignaturesLayer
           signatures={signatures}
+          containerRef={containerRef}
           onSigUpdate={(id, pos) =>
             setSignatures((prev) => prev.map((s) => (s.id === id ? { ...s, ...pos } : s)))
           }
@@ -236,12 +270,12 @@ const embedFont = async (pdfDoc, family, cache) => {
       </div>
 
       {/* ======= Sidebar ======= */}
-      <aside className="w-80 shrink-0 border-l bg-white flex flex-col">
+      <aside className="w-80 shrink-0 border-l bg-purple-50 flex flex-col">
         {/* header */}
         <div className="flex items-center justify-between gap-2 px-4 py-3 border-b">
           <button
             onClick={() => navigate(-1)}
-            className="inline-flex items-center gap-1 text-sm text-cyan-700 hover:text-cyan-900"
+            className="inline-flex items-center gap-1 text-sm text-purple-700 hover:text-purple-900"
           >
             <ArrowLeft size={16} /> Back
           </button>
@@ -259,17 +293,11 @@ const embedFont = async (pdfDoc, family, cache) => {
             <div className="space-y-2">
               <button
                 onClick={() => setShowTypePanel((p) => !p)}
-                className="w-full rounded-lg border px-3 py-2 text-left text-sm hover:bg-gray-50"
+                className="w-full rounded-lg border px-3 py-2 mb-3 text-center font-bold text-sm hover:bg-gray-50"
               >
                 Type Signature
               </button>
-
-              <button className="w-full rounded-lg border px-3 py-2 text-left text-sm hover:bg-gray-50">
-                Draw Signature
-              </button>
-              <button className="w-full rounded-lg border px-3 py-2 text-left text-sm hover:bg-gray-50">
-                Upload Signature
-              </button>
+              
             </div>
 
             {/* collapsible panel */}
@@ -292,9 +320,17 @@ const embedFont = async (pdfDoc, family, cache) => {
 
             <button
   onClick={handleFinalizePDF}
-  className="w-full rounded-lg border px-3 py-2 text-left text-sm hover:bg-gray-50"
+  className="w-full rounded-lg border-white  bg-green-200 px-3 py-2 text-center text-green-800  font-bold text-sm hover:bg-green-100"
 >
-  Finalize PDF (with Signatures)
+  Download (with Signature)
+</button>
+
+          <button
+  onClick={handleDeleteLastSignature}
+  disabled={!signatures.length}
+  className="w-full rounded-lg border px-3 py-2 mt-3.5 text-center font-bold text-sm
+             text-red-700 hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed">
+  Delete Last Signature
 </button>
           </section>
 
